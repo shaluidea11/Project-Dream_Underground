@@ -1,0 +1,11 @@
+order_id,customer_email,amount,status,product,quantity,ordered_at
+ORD-10001,aarav.sharma@example.com,1500.00,completed,Wireless Headphones,1,2024-06-15
+ORD-10002,aditi.patel@example.com,2300.50,completed,Smart Watch,1,2024-07-20
+ORD-10003,aisha.singh@example.com,450.00,completed,Yoga Mat,2,2024-08-10
+ORD-10004,akash.kumar@example.com,3200.00,completed,Running Shoes,1,2024-09-05
+ORD-10005,ananya.gupta@example.com,800.00,completed,Backpack,1,2024-10-12
+ORD-10006,arjun.reddy@example.com,1200.00,completed,Bluetooth Speaker,1,2024-11-01
+ORD-10007,bhavya.mehta@example.com,550.00,completed,Water Bottle,3,2024-11-15
+ORD-10008,chandra.shah@example.com,4500.00,completed,Laptop Stand,2,2024-12-01
+ORD-10009,devi.verma@example.com,950.00,completed,Fitness Tracker,1,2025-01-10
+ORD-10010,dhruv.joshi@example.com,350.00,completed,Phone Case,2,2025-02-20

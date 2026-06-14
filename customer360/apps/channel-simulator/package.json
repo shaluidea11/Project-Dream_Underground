@@ -1,0 +1,20 @@
+{
+  "name": "channel-simulator",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node --transpile-only src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "@fastify/cors": "^10.0.0",
+    "undici": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  }
+}
