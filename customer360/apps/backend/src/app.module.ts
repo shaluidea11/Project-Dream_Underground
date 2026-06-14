@@ -37,13 +37,24 @@ import { AgentsModule } from './agents/agents.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const rawDatabaseUrl = config.get<string>('DATABASE_URL');
-        const databaseUrl = rawDatabaseUrl
-          ? (rawDatabaseUrl.includes('@base:')
-              ? rawDatabaseUrl.replace('@base:', '@base.railway.internal:')
-              : (rawDatabaseUrl.includes('@base/')
-                  ? rawDatabaseUrl.replace('@base/', '@base.railway.internal/')
-                  : rawDatabaseUrl))
-          : undefined;
+        let databaseUrl = rawDatabaseUrl;
+        if (rawDatabaseUrl) {
+          try {
+            const parsed = new URL(rawDatabaseUrl);
+            if (parsed.hostname === 'base') {
+              parsed.hostname = 'base.railway.internal';
+            }
+            databaseUrl = parsed.toString();
+          } catch {
+            if (rawDatabaseUrl.includes('//base:')) {
+              databaseUrl = rawDatabaseUrl.replace('//base:', '//base.railway.internal:');
+            } else if (rawDatabaseUrl.includes('@base:')) {
+              databaseUrl = rawDatabaseUrl.replace('@base:', '@base.railway.internal:');
+            } else if (rawDatabaseUrl.includes('base')) {
+              databaseUrl = rawDatabaseUrl.replace('base', 'base.railway.internal');
+            }
+          }
+        }
         const isProduction = config.get('NODE_ENV') === 'production';
 
         // Prefer DATABASE_URL (Neon/Railway), fallback to individual vars (local dev)
@@ -63,7 +74,7 @@ import { AgentsModule } from './agents/agents.module';
 
         return {
           type: 'postgres',
-          host: config.get<string>('DB_HOST') === 'base' ? 'base.railway.internal' : config.get('DB_HOST', 'localhost'),
+          host: (config.get<string>('DB_HOST') || '').trim().toLowerCase() === 'base' ? 'base.railway.internal' : config.get('DB_HOST', 'localhost'),
           port: config.get<number>('DB_PORT', 5432),
           username: config.get('DB_USERNAME', 'postgres'),
           password: config.get('DB_PASSWORD', 'postgres'),
