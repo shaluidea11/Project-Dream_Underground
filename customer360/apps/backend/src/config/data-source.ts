@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import * as dotenv from 'dotenv';
 import { join } from 'path';
+import * as entities from '../entities/index';
 
 dotenv.config();
 
@@ -28,7 +29,9 @@ const connectionOptions = databaseUrl
 export default new DataSource({
   type: 'postgres',
   ...connectionOptions,
-  entities: [join(baseDir, 'src/**/*.entity{.ts,.js}')],
-  migrations: [join(baseDir, 'src/migrations/*{.ts,.js}')],
+  entities: Object.values(entities),
+  // Resolve relative to this file so it works both in dev (src/*.ts) and compiled (dist/*.js)
+  migrations: [join(__dirname, '../migrations/*.{ts,js}')],
   synchronize: false,
 } as any);
+

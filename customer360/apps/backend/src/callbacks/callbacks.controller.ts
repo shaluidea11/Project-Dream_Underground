@@ -1,6 +1,7 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { SkipThrottle } from '@nestjs/throttler';
 import { SimulatorSecretGuard } from './guards/simulator-secret.guard';
 
 interface CallbackDto {
@@ -12,6 +13,7 @@ interface CallbackDto {
 
 @Controller('callbacks')
 @UseGuards(SimulatorSecretGuard)
+@SkipThrottle()
 export class CallbacksController {
   constructor(
     @InjectQueue('callback.process')

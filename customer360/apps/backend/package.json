@@ -6,10 +6,11 @@
     "build": "npx nest build",
     "dev": "npx nest start --watch",
     "start": "npx nest start",
-    "start:prod": "node dist/main.js",
+    "start:prod": "npm run migration:run:prod && node dist/main.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "migration:generate": "typeorm migration:generate -d src/config/data-source.ts",
     "migration:run": "ts-node -P tsconfig.json -r tsconfig-paths/register ../../node_modules/typeorm/cli.js migration:run -d src/config/data-source.ts",
+    "migration:run:prod": "node ../../node_modules/typeorm/cli.js migration:run -d dist/config/data-source.js",
     "migration:revert": "ts-node -P tsconfig.json -r tsconfig-paths/register ../../node_modules/typeorm/cli.js migration:revert -d src/config/data-source.ts",
     "seed": "ts-node -r tsconfig-paths/register src/seed/run-seed.ts"
   },

@@ -2,6 +2,7 @@ import {
   Injectable,
   ExecutionContext,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
@@ -11,14 +12,24 @@ import Redis from 'ioredis';
 export class JwtAuthGuard extends AuthGuard('jwt') {
   private redis: Redis;
 
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(private readonly configService: ConfigService) {
     super();
-    this.redis = new Redis({
-      host: this.configService.get('REDIS_HOST', 'localhost'),
-      port: this.configService.get<number>('REDIS_PORT', 6379),
-      password: this.configService.get('REDIS_PASSWORD', undefined),
-      maxRetriesPerRequest: 1,
-      connectTimeout: 3000,
+    const redisUrl = this.configService.get<string>('REDIS_URL');
+    if (redisUrl) {
+      this.redis = new Redis(redisUrl, { maxRetriesPerRequest: null, connectTimeout: 3000 });
+    } else {
+      this.redis = new Redis({
+        host: this.configService.get('REDIS_HOST', 'localhost'),
+        port: this.configService.get<number>('REDIS_PORT', 6379),
+        password: this.configService.get('REDIS_PASSWORD', undefined),
+        maxRetriesPerRequest: null,
+        connectTimeout: 3000,
+      });
+    }
+    this.redis.on('error', (err) => {
+      this.logger.error(`Redis blacklist guard error: ${err.message}`);
     });
   }
 

@@ -164,6 +164,7 @@ _This section is appended at the end of each stage by the agent. Starts empty._
 | 10 | DATABASE_URL + REDIS_URL support for production | Neon/Upstash provide connection strings; fallback to individual vars for local Docker dev | data-source.ts, app.module.ts |
 | 10 | Sentry NestJS integration | @sentry/nestjs with SentryModule + SentryGlobalFilter for production error tracking | instrument.ts, app.module.ts, main.ts |
 | 10 | Railway Dockerfiles + railway.toml | Multi-stage Docker builds for backend, single-stage for simulator, Nixpacks config | Dockerfile, railway.toml |
+| 3 / 10 | Add tags column to customers table | Resolve QueryFailedError due to tags property in Customer entity not existing in database | customer.entity.ts, 1781460017055-AddTagsToCustomers.ts |
 | 10 | Backend binds to 0.0.0.0 | Railway requires container-accessible binding, not localhost-only | main.ts |
 
 ---

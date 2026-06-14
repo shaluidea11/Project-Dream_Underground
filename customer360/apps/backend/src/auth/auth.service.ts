@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -22,6 +23,8 @@ const BCRYPT_ROUNDS = 12;
 export class AuthService {
   private redis: Redis;
 
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
@@ -29,12 +32,20 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
   ) {
-    this.redis = new Redis({
-      host: this.configService.get('REDIS_HOST', 'localhost'),
-      port: this.configService.get<number>('REDIS_PORT', 6379),
-      password: this.configService.get('REDIS_PASSWORD', undefined),
-      maxRetriesPerRequest: 1,
-      connectTimeout: 3000,
+    const redisUrl = this.configService.get<string>('REDIS_URL');
+    if (redisUrl) {
+      this.redis = new Redis(redisUrl, { maxRetriesPerRequest: null, connectTimeout: 3000 });
+    } else {
+      this.redis = new Redis({
+        host: this.configService.get('REDIS_HOST', 'localhost'),
+        port: this.configService.get<number>('REDIS_PORT', 6379),
+        password: this.configService.get('REDIS_PASSWORD', undefined),
+        maxRetriesPerRequest: null,
+        connectTimeout: 3000,
+      });
+    }
+    this.redis.on('error', (err) => {
+      this.logger.error(`Redis auth service error: ${err.message}`);
     });
   }
 

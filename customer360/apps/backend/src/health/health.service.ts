@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import Redis from 'ioredis';
@@ -8,16 +8,26 @@ import { ConfigService } from '@nestjs/config';
 export class HealthService {
   private redis: Redis;
 
+  private readonly logger = new Logger(HealthService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly config: ConfigService,
   ) {
-    this.redis = new Redis({
-      host: this.config.get('REDIS_HOST', 'localhost'),
-      port: this.config.get<number>('REDIS_PORT', 6379),
-      password: this.config.get('REDIS_PASSWORD', undefined),
-      maxRetriesPerRequest: 1,
-      connectTimeout: 3000,
+    const redisUrl = this.config.get<string>('REDIS_URL');
+    if (redisUrl) {
+      this.redis = new Redis(redisUrl, { maxRetriesPerRequest: null, connectTimeout: 3000 });
+    } else {
+      this.redis = new Redis({
+        host: this.config.get('REDIS_HOST', 'localhost'),
+        port: this.config.get<number>('REDIS_PORT', 6379),
+        password: this.config.get('REDIS_PASSWORD', undefined),
+        maxRetriesPerRequest: null,
+        connectTimeout: 3000,
+      });
+    }
+    this.redis.on('error', (err) => {
+      this.logger.error(`Redis health check error: ${err.message}`);
     });
   }
 

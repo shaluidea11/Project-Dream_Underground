@@ -1,34 +1,44 @@
 # deployment.md — Customer360 AI CRM
-> **Dream Underground CRM** | Deployment Reference Document  
-> Version: 1.0 | Status: Approved for Stage 0
+> **Dream Underground CRM** | Deployment Reference Document
+> Audience: reviewers / external readers — *how the live application is deployed and wired together.*
+> For the step-by-step "how do **we** deploy it" runbook, see [`DEPLOY.md`](DEPLOY.md).
 
 ---
 
 ## 1. Deployment Architecture
 
+The system is a monorepo (npm workspaces) of three deployable apps plus two managed
+data services. Deploys are triggered by **git push** — Vercel and Railway both watch the
+repository and rebuild automatically. There is no separate CI server.
+
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  GitHub Repository (monorepo)                           │
+│  GitHub Repository (monorepo — npm workspaces)          │
 │  apps/frontend | apps/backend | apps/channel-simulator  │
-└──────────────┬──────────────────────────────────────────┘
-               │ GitHub Actions CI/CD
-       ┌───────┴───────┐
-       ▼               ▼
-  ┌─────────┐    ┌─────────────────────────────┐
-  │  Vercel │    │  Railway                    │
-  │         │    │  ┌──────────┐ ┌──────────┐  │
-  │ Next.js │    │  │ NestJS   │ │ Fastify  │  │
-  │Frontend │    │  │ Backend  │ │Simulator │  │
-  └─────────┘    │  └────┬─────┘ └──────────┘  │
-                 └───────┼─────────────────────┘
-                         │
-             ┌───────────┼───────────┐
-             ▼           ▼           ▼
-        ┌─────────┐ ┌─────────┐ ┌─────────┐
-        │  Neon   │ │Upstash  │ │UploadT. │
-        │  (PG)   │ │ (Redis) │ │  (S3)   │
-        └─────────┘ └─────────┘ └─────────┘
+└──────────────┬───────────────────────┬──────────────────┘
+   push        │                        │   push
+       ┌───────┴───────┐        ┌───────┴──────────────────┐
+       ▼               │        ▼                          │
+  ┌─────────┐          │   ┌─────────────────────────────┐ │
+  │  Vercel │          │   │  Railway (one project)      │ │
+  │         │          │   │  ┌──────────┐ ┌──────────┐  │ │
+  │ Next.js │ ──/api──►│   │  │ NestJS   │ │ Fastify  │  │ │
+  │Frontend │  (proxy) │   │  │ Backend  │►│Simulator │  │ │
+  └─────────┘          │   │  └────┬─────┘ └────┬─────┘  │ │
+                       │   └───────┼────────────┼────────┘ │
+                       │           │   callbacks│           │
+                       │           │◄───────────┘           │
+              ┌────────┴───┐   ┌───┴─────┐  ┌────────────┐
+              ▼            ▼   ▼         ▼  ▼            ▼
+         ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌──────────────┐
+         │  Neon   │  │ Upstash │  │ Google  │  │   Sentry     │
+         │  (PG)   │  │ (Redis) │  │ Gemini  │  │ (optional)   │
+         └─────────┘  └─────────┘  └─────────┘  └──────────────┘
 ```
+
+The frontend never calls the backend cross-origin in the browser: Next.js **rewrites**
+`/api/*` and `/health` to the backend URL (see `apps/frontend/next.config.ts`), so the
+browser only ever talks to the Vercel origin.
 
 ---
 
@@ -36,406 +46,226 @@
 
 | Service | Platform | Plan | Notes |
 |---|---|---|---|
-| Frontend | Vercel | Hobby (free) | Auto-deploy on push to `main` |
-| Backend (NestJS) | Railway | Starter $5/mo | Always-on, not serverless |
-| Channel Simulator | Railway | Starter $5/mo | Separate service within same Railway project |
-| PostgreSQL | Neon | Free tier | 512MB storage, 1 compute unit |
-| Redis | Upstash | Free tier | 10k commands/day, BullMQ compatible |
-| File Storage | UploadThing | Free tier | 2GB storage, 4GB bandwidth/mo |
-| Error Tracking | Sentry | Free | 5k errors/mo |
-| Product Analytics | PostHog | Free | 1M events/mo |
+| Frontend (Next.js) | Vercel | Hobby (free) | Auto-deploy on push. Root dir = `customer360/apps/frontend` |
+| Backend (NestJS API + workers) | Railway | Free/Starter | Always-on (not serverless — BullMQ workers run in-process) |
+| Channel Simulator (Fastify) | Railway | Free/Starter | Separate service in the **same** Railway project |
+| PostgreSQL | Neon | Free tier | 512 MB. Connected via `DATABASE_URL` (SSL required) |
+| Redis | Upstash | Free tier | BullMQ backend. Connected via `REDIS_URL` (`rediss://`, TLS) |
+| Error Tracking | Sentry | Free (optional) | Enabled only if `SENTRY_DSN` is set; safe to leave unset |
+
+> **Not used in this build:** there is no external object storage (UploadThing/S3) and no
+> product-analytics tool (PostHog). CSV/Excel uploads are parsed **in memory** (Multer) and
+> never persisted to a bucket. Earlier drafts of this doc referenced those services; they were
+> consciously dropped to keep the deployment surface minimal.
 
 ---
 
 ## 3. Environment Variables
 
-### 3.1 Frontend (Vercel) — `apps/frontend/.env`
+Each app reads a flat `.env`. Connection-string vars (`DATABASE_URL`, `REDIS_URL`) take
+precedence; the individual `DB_*` / `REDIS_*` vars are the local-Docker fallback.
+
+### 3.1 Frontend (Vercel) — `apps/frontend`
 
 ```bash
-# Public (exposed to browser — prefix NEXT_PUBLIC_)
-NEXT_PUBLIC_API_URL=https://api.customer360.railway.app
-NEXT_PUBLIC_POSTHOG_KEY=phc_xxxxxxxxxxxxxxxxxxxx
-NEXT_PUBLIC_POSTHOG_HOST=https://app.posthog.com
-
-# Server-only (used in Next.js route handlers only)
-UPLOADTHING_SECRET=sk_live_xxxxxxxxxxxxxxxxxxxx
-UPLOADTHING_APP_ID=xxxxxxxxxxxx
+# Public — the backend's public base URL. Used by next.config.ts to proxy /api and /health.
+NEXT_PUBLIC_API_URL=https://<backend>.up.railway.app
 ```
 
-### 3.2 Backend (Railway) — `apps/backend/.env`
+### 3.2 Backend (Railway) — `apps/backend`
 
 ```bash
-# Server
 NODE_ENV=production
-PORT=3001
+PORT=3001                         # Railway injects PORT; this is the fallback
+FRONTEND_URL=https://<frontend>.vercel.app   # CORS allow-origin
 
-# Database
-DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-1.aws.neon.tech/customer360?sslmode=require
+# Database (Neon) — SSL is auto-enabled when NODE_ENV=production
+DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/customer360?sslmode=require
 
-# Redis
-REDIS_URL=rediss://default:xxxxxxxxxxxx@us1-xxx.upstash.io:6379
+# Redis (Upstash)
+REDIS_URL=rediss://default:xxxx@xxx.upstash.io:6379
 
 # Auth
-JWT_SECRET=<64-char random secret — generate with: openssl rand -hex 32>
-JWT_EXPIRES_IN=7d
-COOKIE_SECRET=<another 64-char random secret>
+JWT_SECRET=<64-char random — openssl rand -hex 32>
+JWT_EXPIRY=1d
 
-# Gemini (free tier — get key from https://aistudio.google.com)
-GEMINI_API_KEY=AIzaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-GEMINI_MODEL=gemini-2.0-flash
+# Gemini (free tier — https://aistudio.google.com)
+GEMINI_API_KEY=AIza...
 
-# Channel Simulator (internal Railway URL)
-CHANNEL_SIMULATOR_URL=https://simulator.customer360.railway.app
-CHANNEL_SIMULATOR_SECRET=<shared secret for callback auth>
+# Channel simulator (backend → simulator outbound)
+SIMULATOR_URL=https://<simulator>.up.railway.app
+SIMULATOR_SECRET=<shared secret>             # also accepts CHANNEL_SIMULATOR_URL / CHANNEL_SIMULATOR_SECRET
 
-# Callback URL (this service's own public URL, sent to simulator)
-CRM_CALLBACK_URL=https://api.customer360.railway.app/callbacks/delivery
-
-# UploadThing
-UPLOADTHING_SECRET=sk_live_xxxxxxxxxxxxxxxxxxxx
-UPLOADTHING_APP_ID=xxxxxxxxxxxx
-
-# Sentry
-SENTRY_DSN=https://xxxx@oXXXX.ingest.sentry.io/XXXXX
-
-# PostHog (server-side)
-POSTHOG_API_KEY=phc_xxxxxxxxxxxxxxxxxxxx
+# Sentry (optional — leave empty to disable)
+SENTRY_DSN=
 ```
 
-### 3.3 Channel Simulator (Railway) — `apps/channel-simulator/.env`
+### 3.3 Channel Simulator (Railway) — `apps/channel-simulator`
 
 ```bash
 NODE_ENV=production
-PORT=3002
+PORT=3002                         # Railway injects PORT; this is the fallback
 
-# Shared secret — simulator validates this on incoming /send requests
-SIMULATOR_SECRET=<same shared secret as CRM_SIMULATOR_SECRET above>
+# Must match the backend's SIMULATOR_SECRET — sent as X-Simulator-Secret on every callback
+SIMULATOR_SECRET=<same shared secret as backend>
 
-# The CRM callback URL — simulator posts delivery events here
-CRM_CALLBACK_URL=https://api.customer360.railway.app/callbacks/delivery
+# Where the simulator posts delivery events (the backend's receipt API)
+CRM_CALLBACK_URL=https://<backend>.up.railway.app/api/callbacks/delivery
 
-# Sentry
-SENTRY_DSN=https://xxxx@oXXXX.ingest.sentry.io/XXXXX
+# Optional — compress the 30s/60s lifecycle delays for demos (e.g. 0.05 = 20x faster)
+SIMULATOR_DELAY_SCALE=1.0
+
+# Sentry (optional)
+SENTRY_DSN=
 ```
 
-### 3.4 Local Development — Root `.env` (shared via npm workspaces)
+### 3.4 Local Development — per-app `.env` (copied from each `.env.example`)
 
 ```bash
-# Local overrides
-NODE_ENV=development
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/customer360
-REDIS_URL=redis://localhost:6379
-CHANNEL_SIMULATOR_URL=http://localhost:3002
-CRM_CALLBACK_URL=http://localhost:3001/callbacks/delivery
+# backend/.env
+DATABASE_URL=                                  # leave blank → falls back to DB_* below
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+DB_NAME=customer360
+REDIS_URL=                                      # leave blank → falls back to REDIS_* below
+REDIS_HOST=localhost
+REDIS_PORT=6379
+JWT_SECRET=dev-secret
+SIMULATOR_URL=http://localhost:3002
+SIMULATOR_SECRET=dev-secret
+
+# channel-simulator/.env
+SIMULATOR_SECRET=dev-secret
+CRM_CALLBACK_URL=http://localhost:3001/api/callbacks/delivery
+
+# frontend/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:3001
 ```
 
 ---
 
-## 4. CI/CD Pipeline (GitHub Actions)
+## 4. Build & Release
 
-### 4.1 File: `.github/workflows/deploy.yml`
+There is **no GitHub Actions pipeline**. Releases are git-push driven on the hosting
+platforms (a conscious scope decision — see NOTES.md, Stage 10).
 
-```yaml
-name: Deploy
+| App | Builder | Build command | Start command |
+|---|---|---|---|
+| Backend | Railway / Nixpacks (`railway.toml`) | `npm run build` (`nest build`) | `npm run start:prod` (migrate → `node dist/main.js`) |
+| Simulator | Railway / Nixpacks (`railway.toml`) | `npm run build` | `node dist/server.js` |
+| Frontend | Vercel | `next build` | `next start` (managed by Vercel) |
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+- Backend `railway.toml`: healthcheck `GET /health`, `restartPolicyType = ON_FAILURE`, max 3 retries.
+- Simulator `railway.toml`: same restart policy (no healthcheck path defined).
+- Backend binds to `0.0.0.0` (required for Railway container networking).
 
-jobs:
-  # ─────────────────────────────
-  # 1. Lint + Type Check
-  # ─────────────────────────────
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run lint --workspaces
-      - run: npm run typecheck --workspaces
+---
 
-  # ─────────────────────────────
-  # 2. Tests
-  # ─────────────────────────────
-  test:
-    runs-on: ubuntu-latest
-    needs: lint
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: customer360_test
-        ports:
-          - 5432:5432
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run test --workspaces --if-present
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/customer360_test
-          REDIS_URL: redis://localhost:6379
+## 5. Database Schema & Seeding
 
-  # ─────────────────────────────
-  # 3. Deploy Frontend (Vercel)
-  # ─────────────────────────────
-  deploy-frontend:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run build --workspace=apps/frontend
-        env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
-      - uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: apps/frontend
-          vercel-args: '--prod'
+Tool: **TypeORM migrations** (`synchronize: false` — schema is never auto-mutated from entities).
 
-  # ─────────────────────────────
-  # 4. Deploy Backend (Railway)
-  # ─────────────────────────────
-  deploy-backend:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-      - run: npm install -g @railway/cli
-      - run: railway up --service backend
-        working-directory: apps/backend
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-
-  # ─────────────────────────────
-  # 5. Deploy Simulator (Railway)
-  # ─────────────────────────────
-  deploy-simulator:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm install -g @railway/cli
-      - run: railway up --service simulator
-        working-directory: apps/channel-simulator
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+```bash
+# Run all pending migrations (creates/updates schema)
+npm run migration:run     --workspace=apps/backend
+# Generate a new migration from entity changes
+npm run migration:generate --workspace=apps/backend -- src/migrations/<Name>
+# Revert the last migration
+npm run migration:revert  --workspace=apps/backend
 ```
 
-### 4.2 Required GitHub Secrets
+**Migrations run automatically on deploy.** The backend start command is `npm run start:prod`,
+which runs `migration:run:prod` (TypeORM CLI against the compiled `dist/config/data-source.js`,
+no `ts-node`) and then `node dist/main.js`. A fresh database gets its full schema on first boot
+with no manual step.
+
+**Auto-seed:** on boot, `main.ts` counts `customers` and `users`; if **both** are empty it seeds
+demo data and an admin user. This is wrapped in try/catch and is non-fatal — if the tables do
+not exist yet (migrations not run), the server still starts and logs a warning.
+
+Current migrations (`apps/backend/src/migrations/`):
 
 ```
-VERCEL_TOKEN
-VERCEL_ORG_ID
-VERCEL_PROJECT_ID
-RAILWAY_TOKEN
-NEXT_PUBLIC_API_URL
-NEXT_PUBLIC_POSTHOG_KEY
-GEMINI_API_KEY
+1718000000000-InitialSchema.ts
+1718000000001-AddTrendInsightsAndCampaignReport.ts
+1781460017055-AddTagsToCustomers.ts
 ```
 
 ---
 
-## 5. Database Migration Strategy
+## 6. The Channel Loop in Production
 
-### 5.1 Migration Tool
-TypeORM CLI migrations. Each schema change = one migration file.
+The two-service callback loop spans both Railway services:
 
-```bash
-# Generate migration from entity changes
-npm run migration:generate --workspace=apps/backend -- src/migrations/AddCustomerEngagementScore
+1. Campaign launch → backend `campaign.send` BullMQ worker writes `Communication` rows and
+   `POST`s each to `${SIMULATOR_URL}/send`.
+2. Simulator returns `202` immediately and asynchronously fires lifecycle callbacks to
+   `${CRM_CALLBACK_URL}` with header `X-Simulator-Secret`.
+3. Backend `POST /api/callbacks/delivery` (guarded by `SimulatorSecretGuard`) enqueues to the
+   `callback.process` queue → updates communication state (monotonic, out-of-order safe) →
+   enqueues `analytics.compute` → dashboard funnel updates.
 
-# Run pending migrations
-npm run migration:run --workspace=apps/backend
+**Operational notes / known limits:**
+- Callbacks are **at-most-once**: if the backend is unreachable the simulator logs and drops the
+  event (no retry). Analytics are idempotent because they fully recompute from the DB.
+- Both `SIMULATOR_SECRET` values **must match** across the two services or all callbacks 401.
+- Free-tier Gemini is 15 RPM / 1,500 req/day — heavy live AI use can hit `429`.
 
-# Revert last migration
-npm run migration:revert --workspace=apps/backend
-```
+---
 
-### 5.2 Migration on Deploy
-Railway deploy command includes migration run:
+## 7. Health & Monitoring
+
+`GET /health` (unprefixed, excluded from the global `/api` prefix) returns:
 
 ```json
-// apps/backend/package.json
-{
-  "scripts": {
-    "start:prod": "npm run migration:run && node dist/main",
-    "migration:run": "typeorm migration:run -d dist/data-source.js",
-    "migration:generate": "typeorm migration:generate -d src/data-source.ts"
-  }
-}
+{ "status": "ok", "services": { "database": "ok", "redis": "ok" } }
 ```
 
-### 5.3 Migration File Naming
-```
-src/migrations/
-├── 1700000001000-CreateUsersTable.ts
-├── 1700000002000-CreateCustomersTable.ts
-├── 1700000003000-CreateOrdersTable.ts
-├── 1700000004000-CreateSegmentsTable.ts
-├── 1700000005000-CreateCampaignsTable.ts
-├── 1700000006000-CreateCommunicationsTable.ts
-└── 1700000007000-CreateAuditLogsTable.ts
-```
+`status` is `"degraded"` if any dependency check fails. Railway uses this as the backend
+healthcheck. The simulator exposes its own `GET /health` returning
+`{ "status": "ok", "service": "channel-simulator" }`.
+
+| Surface | What it covers |
+|---|---|
+| `/health` (backend) | Postgres + Redis reachability |
+| `/health` (simulator) | Process liveness |
+| Sentry (if `SENTRY_DSN` set) | Unhandled exceptions via `@sentry/nestjs` global filter |
+| Railway metrics | CPU / memory / restarts per service |
+| Neon / Upstash consoles | DB storage + connections, Redis command quota |
 
 ---
 
-## 6. Backup Strategy
+## 8. Rollback
 
-### 6.1 Database (Neon)
-- Neon provides **point-in-time recovery** on free tier (7 days)
-- Manual backup: nightly pg_dump via Railway cron job
-  ```bash
-  pg_dump $DATABASE_URL | gzip > backup_$(date +%Y%m%d).sql.gz
-  ```
-- Backup stored in UploadThing bucket under `/backups/`
-
-### 6.2 Redis (Upstash)
-- BullMQ job results: `removeOnComplete: { count: 100 }` — not backup-critical
-- No persistent Redis backup needed (queues are transient)
+- **Frontend (Vercel):** redeploy any previous deployment from the dashboard (instant promote).
+- **Backend / Simulator (Railway):** redeploy a previous build from the service's deploy history.
+- **Database:** every migration ships a `down()`; run `migration:revert` for the last one.
+  Prefer additive migrations (`ADD COLUMN`) over destructive ones.
 
 ---
 
-## 7. Rollback Strategy
+## 9. Local Development
 
-### 7.1 Frontend (Vercel)
-- Vercel keeps all deployments. Rollback = click "Promote to Production" on previous deployment in Vercel dashboard.
-- Takes < 30 seconds.
-
-### 7.2 Backend (Railway)
-- Railway keeps deployment history. Rollback via Railway dashboard → "Redeploy" previous image.
-- If DB migration is involved: run `migration:revert` manually via Railway shell.
-
-### 7.3 Database Rollback
-- Every migration has a `down()` method.
-- For destructive changes: write migration with `ALTER TABLE ... ADD COLUMN` only (never DROP in v1).
-- Column drops deferred to next major version.
-
-### 7.4 Hotfix Process
-```
-1. Create hotfix branch from main
-2. Fix + test locally
-3. Push to hotfix/* branch
-4. Open PR → CI runs
-5. Merge → auto-deploy
-6. Monitor Sentry for 15 minutes
-```
-
----
-
-## 8. Local Development Setup
-
-### Prerequisites
-- Node.js 20+
-- Docker Desktop (for local PG + Redis)
-- Git
-
-### Steps
+Prerequisites: Node 20+, Docker Desktop (local Postgres + Redis), Git.
 
 ```bash
-# 1. Clone
-git clone https://github.com/your-org/customer360.git
-cd customer360
+git clone <repo> && cd customer360
+npm install                       # installs all workspaces
+docker compose up -d              # postgres:5432 + redis:6379 (docker-compose.yml)
 
-# 2. Install all workspace dependencies
-npm install
-
-# 3. Start local services
-docker compose up -d  # starts postgres + redis
-
-# 4. Copy env files
-cp apps/backend/.env.example apps/backend/.env
-cp apps/frontend/.env.example apps/frontend/.env
+cp apps/backend/.env.example          apps/backend/.env
 cp apps/channel-simulator/.env.example apps/channel-simulator/.env
+# create apps/frontend/.env.local with NEXT_PUBLIC_API_URL=http://localhost:3001
 
-# 5. Run migrations
-npm run migration:run --workspace=apps/backend
+npm run migration:run --workspace=apps/backend     # create schema
+# (seed runs automatically on first backend boot if DB is empty)
 
-# 6. Seed sample data
-npm run seed --workspace=apps/backend
-
-# 7. Start all services (3 terminals or use concurrently)
-npm run dev --workspace=apps/frontend        # :3000
-npm run dev --workspace=apps/backend         # :3001
+# 3 terminals:
+npm run dev --workspace=apps/backend            # :3001
 npm run dev --workspace=apps/channel-simulator  # :3002
+npm run dev --workspace=apps/frontend           # :3000
 ```
 
-### docker-compose.yml (root)
-
-```yaml
-version: '3.9'
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: customer360
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-volumes:
-  pgdata:
-```
-
----
-
-## 9. Monitoring & Alerting
-
-| Tool | What it monitors | Alert trigger |
-|---|---|---|
-| Sentry | Unhandled exceptions, API errors | Any new error event |
-| Railway metrics | CPU, memory, response time | CPU > 80% for 5m |
-| Neon console | DB connections, query time | > 100 connections |
-| Upstash console | Redis memory, commands/sec | Memory > 80% |
-| Health endpoint | DB + Redis + Simulator reachability | `/health` returns non-200 |
-
-Health endpoint response format:
-```json
-{
-  "status": "ok",
-  "timestamp": "2026-01-15T10:30:00Z",
-  "services": {
-    "database": "ok",
-    "redis": "ok",
-    "simulator": "ok"
-  }
-}
-```
+`docker-compose.yml` (root of `customer360/`) provides `postgres:16-alpine` and `redis:7-alpine`.

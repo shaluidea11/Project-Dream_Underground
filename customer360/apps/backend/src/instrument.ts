@@ -1,7 +1,12 @@
+import * as dotenv from 'dotenv';
 import * as Sentry from '@sentry/nestjs';
 
+dotenv.config();
+
+console.log('Sentry DSN:', process.env.SENTRY_DSN);
+
 Sentry.init({
-  dsn: process.env.SENTRY_DSN || 'https://d9d015c59d68a5b2d3e7e3efe39c9e5e@o4511564344852480.ingest.de.sentry.io/4511564381552720',
+  dsn: process.env.SENTRY_DSN,
   environment: process.env.NODE_ENV || 'development',
-  enabled: process.env.NODE_ENV === 'production',
+  enabled: !!process.env.SENTRY_DSN,
 });

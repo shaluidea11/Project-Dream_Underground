@@ -9,4 +9,9 @@ export class HealthController {
   async check() {
     return this.healthService.check();
   }
+
+  @Get('debug-sentry')
+  getError() {
+    throw new Error('My first Sentry error!');
+  }
 }

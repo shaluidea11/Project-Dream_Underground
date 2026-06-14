@@ -10,6 +10,7 @@ import {
   UploadedFile,
   Query,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
@@ -24,16 +25,25 @@ import { validateUploadFile } from './validators/file-validator';
 @UseGuards(JwtAuthGuard)
 export class UploadController {
   private redisSub: Redis;
+  private readonly logger = new Logger(UploadController.name);
 
   constructor(
     private readonly uploadService: UploadService,
     private readonly config: ConfigService,
   ) {
-    this.redisSub = new Redis({
-      host: this.config.get('REDIS_HOST', 'localhost'),
-      port: this.config.get<number>('REDIS_PORT', 6379),
-      password: this.config.get('REDIS_PASSWORD', undefined),
-      maxRetriesPerRequest: 1,
+    const redisUrl = this.config.get<string>('REDIS_URL');
+    if (redisUrl) {
+      this.redisSub = new Redis(redisUrl, { maxRetriesPerRequest: null });
+    } else {
+      this.redisSub = new Redis({
+        host: this.config.get('REDIS_HOST', 'localhost'),
+        port: this.config.get<number>('REDIS_PORT', 6379),
+        password: this.config.get('REDIS_PASSWORD', undefined),
+        maxRetriesPerRequest: null,
+      });
+    }
+    this.redisSub.on('error', (err) => {
+      this.logger.error(`Redis subscriber error: ${err.message}`);
     });
   }
 
