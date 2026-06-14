@@ -11,12 +11,13 @@ const baseDir = process.cwd().endsWith('apps/backend')
 
 const isProduction = process.env.NODE_ENV === 'production';
 const databaseUrl = process.env.DATABASE_URL;
+const useSsl = isProduction || (databaseUrl && (databaseUrl.includes('neon.tech') || databaseUrl.includes('sslmode=require')));
 
 // Prefer DATABASE_URL (Neon/Railway), fallback to individual vars (local dev)
 const connectionOptions = databaseUrl
   ? {
       url: databaseUrl,
-      ssl: isProduction ? { rejectUnauthorized: false } : false,
+      ssl: useSsl ? { rejectUnauthorized: false } : false,
     }
   : {
       host: process.env.DB_HOST || 'localhost',

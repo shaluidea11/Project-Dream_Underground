@@ -10,7 +10,9 @@
     "dev:frontend": "npm run dev --workspace=apps/frontend",
     "dev:simulator": "npm run dev --workspace=apps/channel-simulator",
     "build": "npm run build --workspaces",
-    "lint": "npm run lint --workspaces"
+    "lint": "npm run lint --workspaces",
+    "start": "npm run start --workspace=apps/backend",
+    "start:prod": "npm run start:prod --workspace=apps/backend"
   },
   "engines": {
     "node": ">=20.0.0"

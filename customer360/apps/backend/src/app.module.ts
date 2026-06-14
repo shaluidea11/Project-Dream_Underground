@@ -41,10 +41,11 @@ import { AgentsModule } from './agents/agents.module';
 
         // Prefer DATABASE_URL (Neon/Railway), fallback to individual vars (local dev)
         if (databaseUrl) {
+          const useSsl = isProduction || databaseUrl.includes('neon.tech') || databaseUrl.includes('sslmode=require');
           return {
             type: 'postgres',
             url: databaseUrl,
-            ssl: isProduction ? { rejectUnauthorized: false } : false,
+            ssl: useSsl ? { rejectUnauthorized: false } : false,
             entities: [__dirname + '/**/*.entity{.ts,.js}'],
             migrations: [__dirname + '/migrations/*{.ts,.js}'],
             synchronize: false,
