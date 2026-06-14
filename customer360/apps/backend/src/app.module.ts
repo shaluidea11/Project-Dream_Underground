@@ -36,7 +36,14 @@ import { AgentsModule } from './agents/agents.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const databaseUrl = config.get<string>('DATABASE_URL');
+        const rawDatabaseUrl = config.get<string>('DATABASE_URL');
+        const databaseUrl = rawDatabaseUrl
+          ? (rawDatabaseUrl.includes('@base:')
+              ? rawDatabaseUrl.replace('@base:', '@base.railway.internal:')
+              : (rawDatabaseUrl.includes('@base/')
+                  ? rawDatabaseUrl.replace('@base/', '@base.railway.internal/')
+                  : rawDatabaseUrl))
+          : undefined;
         const isProduction = config.get('NODE_ENV') === 'production';
 
         // Prefer DATABASE_URL (Neon/Railway), fallback to individual vars (local dev)
@@ -56,7 +63,7 @@ import { AgentsModule } from './agents/agents.module';
 
         return {
           type: 'postgres',
-          host: config.get('DB_HOST', 'localhost'),
+          host: config.get<string>('DB_HOST') === 'base' ? 'base.railway.internal' : config.get('DB_HOST', 'localhost'),
           port: config.get<number>('DB_PORT', 5432),
           username: config.get('DB_USERNAME', 'postgres'),
           password: config.get('DB_PASSWORD', 'postgres'),
