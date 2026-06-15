@@ -10,13 +10,18 @@
 
 ## 0. What we're deploying
 
-| # | Service | Platform | Root directory (on platform) |
+**Current live URLs:**
+- Frontend: https://dream-underground.netlify.app/dashboard
+- Backend: https://dream-underground.up.railway.app
+- Simulator: https://simulator-dream-underground.up.railway.app
+
+| # | Service | Platform | Root / base directory (on platform) |
 |---|---------|----------|------------------------------|
 | 1 | Postgres | Neon | — (managed) |
 | 2 | Redis | Upstash | — (managed) |
 | 3 | Backend (NestJS) | Railway service | `customer360/apps/backend` |
 | 4 | Simulator (Fastify) | Railway service | `customer360/apps/channel-simulator` |
-| 5 | Frontend (Next.js) | Vercel | `customer360/apps/frontend` |
+| 5 | Frontend (Next.js) | Netlify | `customer360/apps/frontend` |
 
 Deploy order matters: **1 → 2 → 3 → 4 → 5**, then go back and fill cross-URLs (§6).
 
@@ -62,7 +67,7 @@ openssl rand -hex 32     # → SIMULATOR_SECRET   (use the SAME value on backend
    JWT_EXPIRY=1d
    GEMINI_API_KEY=<gemini>
    SIMULATOR_SECRET=<generated>
-   FRONTEND_URL=https://PLACEHOLDER         # fill after Vercel (§6)
+   FRONTEND_URL=https://PLACEHOLDER         # fill after Netlify (§6)
    SIMULATOR_URL=https://PLACEHOLDER        # fill after simulator (§6)
    # SENTRY_DSN=  (optional)
    ```
@@ -103,15 +108,19 @@ On first boot with an empty DB, the backend auto-seeds demo data + admin user (c
 
 ---
 
-## 5. Frontend service (Vercel)
+## 5. Frontend service (Netlify)
 
-1. vercel.com → New Project → import the GitHub repo.
-2. **Root Directory** = `customer360/apps/frontend` (Vercel auto-detects Next.js).
+1. netlify.com → Add new site → import from the GitHub repo.
+2. **Base directory** = `customer360/apps/frontend`; build command `npm run build`. Install the
+   **`@netlify/plugin-nextjs`** runtime so Next.js rewrites/SSR work (Netlify auto-detects Next
+   and adds it; confirm it's enabled).
+   - npm-workspace note: if the build can't resolve workspace deps, set Base directory =
+     `customer360` and Package directory / publish to the frontend app accordingly.
 3. **Environment Variable**:
    ```
    NEXT_PUBLIC_API_URL=<BACKEND_URL>
    ```
-   (`next.config.ts` rewrites `/api/*` and `/health` to this — the browser only ever hits Vercel.)
+   (`next.config.ts` rewrites `/api/*` and `/health` to this — the browser only ever hits Netlify.)
 4. Deploy. Note the public URL → this is **FRONTEND_URL**.
 
 ---
@@ -125,7 +134,7 @@ Now that all three URLs exist, fill the placeholders and redeploy the affected s
 | `FRONTEND_URL` | Backend (Railway) | `<FRONTEND_URL>` (fixes CORS) |
 | `SIMULATOR_URL` | Backend (Railway) | `<SIMULATOR_URL>` (outbound sends) |
 | `CRM_CALLBACK_URL` | Simulator (Railway) | `<BACKEND_URL>/api/callbacks/delivery` |
-| `NEXT_PUBLIC_API_URL` | Frontend (Vercel) | `<BACKEND_URL>` |
+| `NEXT_PUBLIC_API_URL` | Frontend (Netlify) | `<BACKEND_URL>` |
 
 Redeploy backend + simulator after changing their vars. Redeploy frontend if you changed its var.
 

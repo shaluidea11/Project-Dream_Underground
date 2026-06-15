@@ -5,10 +5,24 @@
 
 ---
 
+## 0. Live Environment
+
+| Service | URL |
+|---|---|
+| **Frontend (app)** | https://dream-underground.netlify.app/dashboard |
+| **Backend (API)** | https://dream-underground.up.railway.app |
+| **Channel Simulator** | https://simulator-dream-underground.up.railway.app |
+| Backend health | https://dream-underground.up.railway.app/health |
+| Simulator health | https://simulator-dream-underground.up.railway.app/health |
+
+Demo login: `admin@test.com` / `Admin123!`
+
+---
+
 ## 1. Deployment Architecture
 
 The system is a monorepo (npm workspaces) of three deployable apps plus two managed
-data services. Deploys are triggered by **git push** — Vercel and Railway both watch the
+data services. Deploys are triggered by **git push** — Netlify and Railway both watch the
 repository and rebuild automatically. There is no separate CI server.
 
 ```
@@ -20,7 +34,7 @@ repository and rebuild automatically. There is no separate CI server.
        ┌───────┴───────┐        ┌───────┴──────────────────┐
        ▼               │        ▼                          │
   ┌─────────┐          │   ┌─────────────────────────────┐ │
-  │  Vercel │          │   │  Railway (one project)      │ │
+  │ Netlify │          │   │  Railway (one project)      │ │
   │         │          │   │  ┌──────────┐ ┌──────────┐  │ │
   │ Next.js │ ──/api──►│   │  │ NestJS   │ │ Fastify  │  │ │
   │Frontend │  (proxy) │   │  │ Backend  │►│Simulator │  │ │
@@ -38,7 +52,7 @@ repository and rebuild automatically. There is no separate CI server.
 
 The frontend never calls the backend cross-origin in the browser: Next.js **rewrites**
 `/api/*` and `/health` to the backend URL (see `apps/frontend/next.config.ts`), so the
-browser only ever talks to the Vercel origin.
+browser only ever talks to the Netlify origin.
 
 ---
 
@@ -46,7 +60,7 @@ browser only ever talks to the Vercel origin.
 
 | Service | Platform | Plan | Notes |
 |---|---|---|---|
-| Frontend (Next.js) | Vercel | Hobby (free) | Auto-deploy on push. Root dir = `customer360/apps/frontend` |
+| Frontend (Next.js) | Netlify | Free | Auto-deploy on push. Base dir = `customer360/apps/frontend` (Next runtime) |
 | Backend (NestJS API + workers) | Railway | Free/Starter | Always-on (not serverless — BullMQ workers run in-process) |
 | Channel Simulator (Fastify) | Railway | Free/Starter | Separate service in the **same** Railway project |
 | PostgreSQL | Neon | Free tier | 512 MB. Connected via `DATABASE_URL` (SSL required) |
@@ -65,11 +79,11 @@ browser only ever talks to the Vercel origin.
 Each app reads a flat `.env`. Connection-string vars (`DATABASE_URL`, `REDIS_URL`) take
 precedence; the individual `DB_*` / `REDIS_*` vars are the local-Docker fallback.
 
-### 3.1 Frontend (Vercel) — `apps/frontend`
+### 3.1 Frontend (Netlify) — `apps/frontend`
 
 ```bash
 # Public — the backend's public base URL. Used by next.config.ts to proxy /api and /health.
-NEXT_PUBLIC_API_URL=https://<backend>.up.railway.app
+NEXT_PUBLIC_API_URL=https://dream-underground.up.railway.app
 ```
 
 ### 3.2 Backend (Railway) — `apps/backend`
@@ -77,7 +91,7 @@ NEXT_PUBLIC_API_URL=https://<backend>.up.railway.app
 ```bash
 NODE_ENV=production
 PORT=3001                         # Railway injects PORT; this is the fallback
-FRONTEND_URL=https://<frontend>.vercel.app   # CORS allow-origin
+FRONTEND_URL=https://dream-underground.netlify.app   # CORS allow-origin
 
 # Database (Neon) — SSL is auto-enabled when NODE_ENV=production
 DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/customer360?sslmode=require
@@ -93,7 +107,7 @@ JWT_EXPIRY=1d
 GEMINI_API_KEY=AIza...
 
 # Channel simulator (backend → simulator outbound)
-SIMULATOR_URL=https://<simulator>.up.railway.app
+SIMULATOR_URL=https://simulator-dream-underground.up.railway.app
 SIMULATOR_SECRET=<shared secret>             # also accepts CHANNEL_SIMULATOR_URL / CHANNEL_SIMULATOR_SECRET
 
 # Sentry (optional — leave empty to disable)
@@ -110,7 +124,7 @@ PORT=3002                         # Railway injects PORT; this is the fallback
 SIMULATOR_SECRET=<same shared secret as backend>
 
 # Where the simulator posts delivery events (the backend's receipt API)
-CRM_CALLBACK_URL=https://<backend>.up.railway.app/api/callbacks/delivery
+CRM_CALLBACK_URL=https://dream-underground.up.railway.app/api/callbacks/delivery
 
 # Optional — compress the 30s/60s lifecycle delays for demos (e.g. 0.05 = 20x faster)
 SIMULATOR_DELAY_SCALE=1.0
@@ -155,7 +169,7 @@ platforms (a conscious scope decision — see NOTES.md, Stage 10).
 |---|---|---|---|
 | Backend | Railway / Nixpacks (`railway.toml`) | `npm run build` (`nest build`) | `npm run start:prod` (migrate → `node dist/main.js`) |
 | Simulator | Railway / Nixpacks (`railway.toml`) | `npm run build` | `node dist/server.js` |
-| Frontend | Vercel | `next build` | `next start` (managed by Vercel) |
+| Frontend | Netlify | `next build` | served by Netlify's Next.js runtime |
 
 - Backend `railway.toml`: healthcheck `GET /health`, `restartPolicyType = ON_FAILURE`, max 3 retries.
 - Simulator `railway.toml`: same restart policy (no healthcheck path defined).
@@ -239,7 +253,7 @@ healthcheck. The simulator exposes its own `GET /health` returning
 
 ## 8. Rollback
 
-- **Frontend (Vercel):** redeploy any previous deployment from the dashboard (instant promote).
+- **Frontend (Netlify):** redeploy / publish a previous deploy from the Deploys tab (instant rollback).
 - **Backend / Simulator (Railway):** redeploy a previous build from the service's deploy history.
 - **Database:** every migration ships a `down()`; run `migration:revert` for the last one.
   Prefer additive migrations (`ADD COLUMN`) over destructive ones.

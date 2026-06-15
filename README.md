@@ -2,7 +2,8 @@
 
 > An AI-native shopper marketing CRM — built for brands to decide **who to talk to**, **what to say**, and **how to reach them**.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/your-org/customer360)
+**🔗 Live app:** https://dream-underground.netlify.app/dashboard &nbsp;·&nbsp; demo login `admin@test.com` / `Admin123!`
+**API:** https://dream-underground.up.railway.app &nbsp;·&nbsp; **Simulator:** https://simulator-dream-underground.up.railway.app
 
 ---
 
@@ -68,7 +69,7 @@ Full architecture diagram, ERD, agent workflow, and sequence diagrams: see [`doc
 | AI | Google Gemini 2.0 Flash (free tier), LangGraph.js |
 | Auth | JWT + HTTP-only cookies |
 | Storage | UploadThing |
-| Deployment | Vercel (frontend), Railway (backend + simulator) |
+| Deployment | Netlify (frontend), Railway (backend + simulator), Neon (PG), Upstash (Redis) |
 | Monitoring | Sentry, PostHog |
 
 ---
@@ -218,7 +219,7 @@ Password: Admin123!
 Full deployment guide with CI/CD pipeline: see [`docs/deployment.md`](docs/deployment.md)
 
 **Quick summary:**
-- Frontend → Vercel (auto-deploy from `main` branch)
+- Frontend → Netlify (auto-deploy on push)
 - Backend → Railway
 - Channel Simulator → Railway (separate service in same project)
 - Database → Neon PostgreSQL
